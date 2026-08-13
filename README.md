@@ -18,7 +18,7 @@ Docker environment for a NestJS microservices application. It includes two domai
 
    ```bash
    git clone <REPOSITORY_URL>
-   cd 02-Products-App
+   cd 03-Products-Launcher
    ```
 
 2. Create the environment file from the template:
