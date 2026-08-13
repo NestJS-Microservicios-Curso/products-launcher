@@ -1,0 +1,45 @@
+services:
+  products-ms:
+    build:
+      context: ./products-ms
+      dockerfile: Dockerfile
+      target: dev
+    command: npm run start:dev
+    develop:
+      watch:
+        - path: ./products-ms/src
+          target: /usr/src/app/src
+          action: sync
+        - path: ./products-ms/package.json
+          target: /usr/src/app/package.json
+          action: rebuild
+
+  orders-ms:
+    build:
+      context: ./orders-ms
+      dockerfile: Dockerfile
+      target: dev
+    command: npm run start:dev
+    develop:
+      watch:
+        - path: ./orders-ms/src
+          target: /usr/src/app/src
+          action: sync
+        - path: ./orders-ms/package.json
+          target: /usr/src/app/package.json
+          action: rebuild
+
+  client-gateway:
+    build:
+      context: ./client-gateway
+      dockerfile: Dockerfile
+      target: dev
+    command: npm run start:dev
+    develop:
+      watch:
+        - path: ./client-gateway/src
+          target: /usr/src/app/src
+          action: sync
+        - path: ./client-gateway/package.json
+          target: /usr/src/app/package.json
+          action: rebuild

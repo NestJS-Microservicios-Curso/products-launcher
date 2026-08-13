@@ -1,0 +1,105 @@
+services:
+  nats-server:
+    image: nats:2.10-alpine
+    container_name: nats_server
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  orders-db:
+    image: postgres:16.2
+    container_name: orders_database
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ordersdb
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - orders_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ordersdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  products-ms:
+    build:
+      context: ./products-ms
+      dockerfile: Dockerfile
+    container_name: products_microservice
+    environment:
+      PORT: 3001
+      DATABASE_URL: "file:/usr/src/app/prisma/data/dev.db"
+      NATS_SERVERS: "nats://nats-server:4222"
+    volumes:
+      - products_db_data:/usr/src/app/prisma/data
+    depends_on:
+      - nats-server
+    init: true
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  orders-ms:
+    build:
+      context: ./orders-ms
+      dockerfile: Dockerfile
+    container_name: orders_microservice
+    environment:
+      PORT: 3002
+      DATABASE_URL: >-
+        postgresql://postgres:postgres@orders-db:5432/ordersdb?schema=public
+      NATS_SERVERS: "nats://nats-server:4222"
+    depends_on:
+      orders-db:
+        condition: service_healthy
+      nats-server:
+        condition: service_started
+    init: true
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  client-gateway:
+    build:
+      context: ./client-gateway
+      dockerfile: Dockerfile
+    container_name: client_gateway
+    ports:
+      - "${CLIENT_GATEWAY_PORT}:3000"
+    environment:
+      PORT: 3000
+      NATS_SERVERS: "nats://nats-server:4222"
+    depends_on:
+      - nats-server
+    init: true
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  orders_db_data:
+  products_db_data:
