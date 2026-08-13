@@ -38,7 +38,7 @@ services:
 
   products-ms:
     build:
-      context: ./products-ms
+      context: ./products-microservice
       dockerfile: Dockerfile
     container_name: products_microservice
     environment:
@@ -59,7 +59,7 @@ services:
 
   orders-ms:
     build:
-      context: ./orders-ms
+      context: ./orders-microservice
       dockerfile: Dockerfile
     container_name: orders_microservice
     environment:

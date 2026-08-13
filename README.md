@@ -29,7 +29,13 @@ Docker environment for a NestJS microservices application. It includes two domai
 
 3. Check `CLIENT_GATEWAY_PORT` in `.env` and choose the gateway HTTP port.
 
-4. Build and start all services:
+4. Run the following command to rebuild the submodules:
+
+   ```bash
+   git submodule update --init --recursive
+   ```
+
+5. Build and start all services:
 
    - **Production / Standard mode:**
 
