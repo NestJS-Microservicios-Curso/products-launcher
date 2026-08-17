@@ -80,13 +80,37 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  payments-ms:
+    build:
+      context: ./payments-microservice
+      dockerfile: Dockerfile
+    container_name: payments_microservice
+    ports:
+      - "${PAYMENTS_MS_PORT:-3003}:3003"
+    environment:
+      PORT: 3003
+      NATS_SERVERS: "nats://nats-server:4222"
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
+      STRIPE_SUCCESS_URL: ${STRIPE_SUCCESS_URL}
+      STRIPE_CANCEL_URL: ${STRIPE_CANCEL_URL}
+      STRIPE_WEBHOOK_SIGNATURE_SECRET: ${STRIPE_WEBHOOK_SIGNATURE_SECRET}
+    depends_on:
+      - nats-server
+    init: true
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   client-gateway:
     build:
       context: ./client-gateway
       dockerfile: Dockerfile
     container_name: client_gateway
     ports:
-      - "${CLIENT_GATEWAY_PORT}:3000"
+      - "${CLIENT_GATEWAY_PORT:-3000}:3000"
     environment:
       PORT: 3000
       NATS_SERVERS: "nats://nats-server:4222"

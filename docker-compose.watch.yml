@@ -1,31 +1,46 @@
 services:
   products-ms:
     build:
-      context: ./products-ms
+      context: ./products-microservice
       dockerfile: Dockerfile
       target: dev
     command: npm run start:dev
     develop:
       watch:
-        - path: ./products-ms/src
+        - path: ./products-microservice/src
           target: /usr/src/app/src
           action: sync
-        - path: ./products-ms/package.json
+        - path: ./products-microservice/package.json
           target: /usr/src/app/package.json
           action: rebuild
 
   orders-ms:
     build:
-      context: ./orders-ms
+      context: ./orders-microservice
       dockerfile: Dockerfile
       target: dev
     command: npm run start:dev
     develop:
       watch:
-        - path: ./orders-ms/src
+        - path: ./orders-microservice/src
           target: /usr/src/app/src
           action: sync
-        - path: ./orders-ms/package.json
+        - path: ./orders-microservice/package.json
+          target: /usr/src/app/package.json
+          action: rebuild
+
+  payments-ms:
+    build:
+      context: ./payments-microservice
+      dockerfile: Dockerfile
+      target: dev
+    command: npm run start:dev
+    develop:
+      watch:
+        - path: ./payments-microservice/src
+          target: /usr/src/app/src
+          action: sync
+        - path: ./payments-microservice/package.json
           target: /usr/src/app/package.json
           action: rebuild
 
