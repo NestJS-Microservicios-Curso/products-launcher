@@ -85,8 +85,6 @@ services:
       context: ./payments-microservice
       dockerfile: Dockerfile
     container_name: payments_microservice
-    ports:
-      - "${PAYMENTS_MS_PORT:-3003}:3003"
     environment:
       PORT: 3003
       NATS_SERVERS: "nats://nats-server:4222"

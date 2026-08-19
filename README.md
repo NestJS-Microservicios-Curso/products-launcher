@@ -1,21 +1,131 @@
 # Products App (Products Launcher)
 
-Docker environment and multi-repo orchestrator for a NestJS microservices application. It includes domain microservices (`products-ms`, `orders-ms`, `payments-ms`), an HTTP API gateway, NATS messaging, PostgreSQL, SQLite, and Stripe payment processing.
+Docker environment and multi-repo orchestrator for a distributed NestJS microservices application.
 
-## Services
-
-| Service          | Responsibility                                                                           | Exposed port                   |
-| ---------------- | ---------------------------------------------------------------------------------------- | ------------------------------ |
-| `client-gateway` | Inbound HTTP API; communicates with the microservices via NATS.                          | `CLIENT_GATEWAY_PORT` → `3000` |
-| `products-ms`    | Product catalog. Uses SQLite persisted in a Docker volume and seeds 47 initial products. | Not exposed to the host        |
-| `orders-ms`      | Order management. Uses PostgreSQL.                                                       | Not exposed to the host        |
-| `payments-ms`    | Payment processing via Stripe checkout sessions and webhook verification.                | `PAYMENTS_PORT` → `3003`       |
-| `nats-server`    | Messaging between Gateway, Products, Orders, and Payments.                               | `4222`, monitoring `8222`      |
-| `orders-db`      | Orders PostgreSQL database.                                                              | `127.0.0.1:5432`               |
+The architecture follows the **API Gateway Pattern** with **Event-Driven Microservices** powered by **NATS Messaging**, PostgreSQL, SQLite, and Stripe payment processing. All external HTTP traffic is strictly funneled through the API Gateway, leaving internal microservices fully private and decoupled.
 
 ---
 
-## Quick start
+## System Architecture
+
+```mermaid
+flowchart TD
+    subgraph External["External World & Ingress"]
+        Client["Web / Mobile / Postman"]
+        Stripe["Stripe Payments Cloud"]
+        Hookdeck["Hookdeck / Stripe CLI"]
+    end
+
+    subgraph Edge["Edge Layer (Port 3000)"]
+        Gateway["client-gateway (NestJS HTTP API Gateway)\nPrefix: /api"]
+    end
+
+    subgraph Broker["Message Broker"]
+        NATS[("NATS Message Broker\nPort 4222")]
+    end
+
+    subgraph Internal["Internal Services (Private Docker Network - No Exposed HTTP Ports)"]
+        ProductsMS["products-ms\n(SQLite + Seed Data)"]
+        OrdersMS["orders-ms\n(PostgreSQL)"]
+        PaymentsMS["payments-ms\n(Stripe SDK & HMAC Validation)"]
+    end
+
+    subgraph Storage["Databases"]
+        OrdersDB[("PostgreSQL\nordersdb")]
+        ProductsDB[("SQLite\ndev.db")]
+    end
+
+    %% Inbound HTTP
+    Client -->|"HTTP (REST)"| Gateway
+    Stripe -->|"Webhook (POST)"| Hookdeck
+    Hookdeck -->|"POST /api/payments/webhook"| Gateway
+
+    %% Gateway to NATS
+    Gateway <-->|"NATS Request-Reply"| NATS
+
+    %% Internal Communication via NATS
+    NATS <-->|"validate_products\ncreate_product..."| ProductsMS
+    NATS <-->|"createOrder\nfindAllOrders..."| OrdersMS
+    NATS <-->|"create.payment.session\nverify.stripe.webhook"| PaymentsMS
+
+    %% Event-Driven pub/sub
+    PaymentsMS -.->|"Event: payment.succeeded\nEvent: payment.failed"| NATS
+    NATS -.->|"Listen events"| OrdersMS
+
+    %% Persistence
+    OrdersMS --> OrdersDB
+    ProductsMS --> ProductsDB
+```
+
+---
+
+## Services Overview
+
+| Service              | Responsibility                                                                                                                                                  | Network & Port Visibility                       |
+| :------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------- | :---------------------------------------------- |
+| **`client-gateway`** | **Single Inbound HTTP API Gateway** for all external traffic (`/api/products`, `/api/orders`, `/api/payments`). Communicates with workers exclusively via NATS. | Exposed to Host: `CLIENT_GATEWAY_PORT` → `3000` |
+| **`products-ms`**    | Product catalog & price validation. Uses SQLite persisted in Docker volumes with automatic 47-item seed.                                                        | **Private** (Internal NATS only)                |
+| **`orders-ms`**      | Order management, lifecycle state machine (`PENDING`, `PAID`, `CANCELLED`), and transaction receipt storage.                                                    | **Private** (Internal NATS only)                |
+| **`payments-ms`**    | Stripe Checkout session creation, raw body HMAC-SHA256 signature verification, and payment event dispatching.                                                   | **Private** (Internal NATS only)                |
+| **`nats-server`**    | High-performance publish/subscribe and request-reply message broker.                                                                                            | Port `4222`, Monitoring `8222`                  |
+| **`orders-db`**      | Orders PostgreSQL database.                                                                                                                                     | Port `127.0.0.1:5432`                           |
+
+---
+
+## API Endpoints (Gateway HTTP)
+
+All public endpoints are accessible through the Gateway base URL: `http://localhost:3000/api` (or `CLIENT_GATEWAY_PORT`).
+
+### 🛍️ Products (`/api/products`)
+
+| Method   | Endpoint            | Payload / Query                          | Target NATS Pattern | Description                         |
+| :------- | :------------------ | :--------------------------------------- | :------------------ | :---------------------------------- |
+| `POST`   | `/api/products`     | `CreateProductDto` (`{ name, price }`)   | `create_product`    | Creates a new product               |
+| `GET`    | `/api/products`     | `PaginationDto` (`?page=1&limit=10`)     | `find_all_products` | Retrieves paginated active products |
+| `GET`    | `/api/products/:id` | -                                        | `find_one_product`  | Retrieves single product by ID      |
+| `PATCH`  | `/api/products/:id` | `UpdateProductDto` (`{ name?, price? }`) | `update_product`    | Updates product details             |
+| `DELETE` | `/api/products/:id` | -                                        | `delete_product`    | Soft-deletes a product              |
+
+### 📦 Orders (`/api/orders`)
+
+| Method  | Endpoint              | Payload / Query                                           | Target NATS Pattern                      | Description                                                                                                                            |
+| :------ | :-------------------- | :-------------------------------------------------------- | :--------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST`  | `/api/orders`         | `CreateOrderDto` (`{ items: [{ productId, quantity }] }`) | `createOrder` ➔ `create.payment.session` | Creates order in PostgreSQL, validates items with Products, and creates Stripe Checkout session (returns order + `paymentSession.url`) |
+| `GET`   | `/api/orders`         | `OrderPaginationDto` (`?page=1&limit=10&status=...`)      | `findAllOrders`                          | Retrieves paginated orders                                                                                                             |
+| `GET`   | `/api/orders/id/:id`  | -                                                         | `findOneOrder`                           | Retrieves single order by UUID with populated item names & prices                                                                      |
+| `GET`   | `/api/orders/:status` | `PaginationDto` (`?page=1&limit=10`)                      | `findAllByStatus`                        | Retrieves orders filtered by status (`PENDING`, `PAID`, `DELIVERED`, `CANCELLED`)                                                      |
+| `PATCH` | `/api/orders/:id`     | `StatusDto` (`{ status }`)                                | `changeOrderStatus`                      | Updates order status manually                                                                                                          |
+
+### 💳 Payments (`/api/payments`)
+
+| Method | Endpoint                | Payload / Headers                    | Target NATS Pattern     | Description                                                                                       |
+| :----- | :---------------------- | :----------------------------------- | :---------------------- | :------------------------------------------------------------------------------------------------ |
+| `POST` | `/api/payments/webhook` | Raw Body + `stripe-signature` Header | `verify.stripe.webhook` | Ingests Stripe webhook, encodes payload to base64, and delegates HMAC validation to `payments-ms` |
+| `GET`  | `/api/payments/success` | -                                    | Local Gateway response  | Redirect landing page after successful checkout                                                   |
+| `GET`  | `/api/payments/cancel`  | -                                    | Local Gateway response  | Redirect landing page when payment is canceled or aborted                                         |
+
+---
+
+## Internal NATS Contracts
+
+### Request-Reply Patterns (`@MessagePattern`)
+
+| Pattern                  | Sender           | Receiver      | Payload                                              | Response                         |
+| :----------------------- | :--------------- | :------------ | :--------------------------------------------------- | :------------------------------- |
+| `validate_products`      | `orders-ms`      | `products-ms` | `number[]` (product IDs)                             | `ValidatedProduct[]`             |
+| `create.payment.session` | `orders-ms`      | `payments-ms` | `PaymentSessionDto` (`{ orderId, currency, items }`) | `{ cancelUrl, successUrl, url }` |
+| `verify.stripe.webhook`  | `client-gateway` | `payments-ms` | `{ rawBody: string (base64), signature: string }`    | `{ received: true }`             |
+
+### Event-Driven Pub/Sub (`@EventPattern`)
+
+| Event Topic         | Emitter       | Listener    | Payload                                    | Action                                                                        |
+| :------------------ | :------------ | :---------- | :----------------------------------------- | :---------------------------------------------------------------------------- |
+| `payment.succeeded` | `payments-ms` | `orders-ms` | `{ stripePaymentId, orderId, receiptUrl }` | Updates order status to `PAID`, sets `paid: true`, and inserts `OrderReceipt` |
+| `payment.failed`    | `payments-ms` | `orders-ms` | `{ orderId, reason }`                      | Updates order status to `CANCELLED` and logs payment failure                  |
+
+---
+
+## Quick Start
 
 1. Clone the repository and enter the root folder:
 
@@ -37,7 +147,6 @@ Docker environment and multi-repo orchestrator for a NestJS microservices applic
    ```
 
 4. Build and start all services:
-
    - **Production / Standard mode:**
 
      ```bash
@@ -52,11 +161,26 @@ Docker environment and multi-repo orchestrator for a NestJS microservices applic
 
    > [!NOTE]
    > **Architecture Note: File Separation, Compose Watch vs. Legacy Bind Mounts & Volumes**
+   >
    > - **Environment Separation & Production Parity:** We keep development and production configurations in separate files.
    >   - `docker-compose.yml` (Production Base): Builds the multi-stage `runner` target, runs compiled code (`node dist/main.js`), prunes `devDependencies`, and avoids any runtime watching overhead.
    >   - `docker-compose.watch.yml` (Development Overlay): Extends the base configuration to use the `dev` target, runs `npm run start:dev`, and activates Compose Watch.
    > - **Code Hot Reloading without Bind Mounts:** Instead of legacy bind mounts (`volumes: - ./src:/app/src`) that cause severe I/O degradation on macOS and file permission issues, **Compose Watch (`develop.watch`)** detects local file changes and syncs them directly into the running container for instant NestJS hot reloading.
    > - **Data Persistence vs. Code Syncing:** Named database volumes (`orders_db_data`, `products_db_data`) are strictly for persistent storage (PostgreSQL/SQLite) and are defined only in the base file. Stateless services (such as `payments-ms`) require no volumes. Compose files automatically merge when both `-f` flags are supplied.
+
+---
+
+## Webhook Tunneling (Development)
+
+To forward Stripe webhook events to your local API Gateway:
+
+```bash
+# Using Hookdeck CLI (Recommended):
+hookdeck listen 3000 --path /api/payments/webhook
+
+# Using Stripe CLI:
+stripe listen --forward-to localhost:3000/api/payments/webhook
+```
 
 ---
 
@@ -73,7 +197,7 @@ All six services should appear as running: `nats-server`, `orders-db`, `products
 
 ---
 
-## Persistent data
+## Persistent Data
 
 - `orders_db_data`: PostgreSQL data for `orders-ms`.
 - `products_db_data`: SQLite file and catalog for `products-ms`.
@@ -91,8 +215,6 @@ docker compose down -v
 docker compose up --build
 ```
 
-> `docker compose down -v` deletes the persisted Orders and Products data.
-
 ---
 
 ## Git Submodules
@@ -101,16 +223,13 @@ docker compose up --build
 
 1. Create a new repository on GitHub.
 2. Clone the repository to your local machine.
-3. Add the submodule, where `<repository_url>` is the repository URL and `<submodule_name>` is the optional target directory for the submodule (if omitted, Git uses the repository name):
+3. Add the submodule:
 
    ```bash
    git submodule add <repository_url> <submodule_name>
-
-   # Example:
-   git submodule add https://github.com/NestJS-Microservicios-Curso/payments-microservice.git payments-microservice
    ```
 
-4. Stage, commit, and push the changes to the repository:
+4. Stage, commit, and push the changes:
 
    ```bash
    git add .
@@ -118,20 +237,12 @@ docker compose up --build
    git push
    ```
 
-5. Initialize and update submodules. When cloning the repository for the first time, run:
+5. Initialize and update submodules:
 
    ```bash
    git submodule update --init --recursive
    ```
 
-6. To update submodule references to the latest remote commit:
-
-   ```bash
-   git submodule update --remote
-   ```
-
-### Important
+### Important Rule
 
 When working on a repository containing submodules, **always commit and push changes inside the submodule first**, and **then** commit and push the updated submodule reference in the main repository.
-
-Doing it in reverse will cause the main repository to point to commits that do not exist on the remote, leading to submodule reference conflicts.
