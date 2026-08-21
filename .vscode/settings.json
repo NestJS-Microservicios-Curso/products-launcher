@@ -1,13 +1,21 @@
-{
-  "editor.defaultFormatter": "esbenp.prettier-vscode",
-  "editor.formatOnSave": true,
-  "editor.codeActionsOnSave": {
-    "source.fixAll.eslint": "explicit"
-  },
-  "[typescript]": {
-    "editor.defaultFormatter": "esbenp.prettier-vscode"
-  },
-  "[prisma]": {
-    "editor.defaultFormatter": "Prisma.prisma"
-  }
-}
+    {
+      "editor.defaultFormatter": "esbenp.prettier-vscode",
+      "editor.formatOnSave": true,
+      "editor.codeActionsOnSave": {
+        "source.fixAll.eslint": "explicit"
+      },
+      "[typescript]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode"
+      },
+      "[prisma]": {
+        "editor.defaultFormatter": "Prisma.prisma"
+      },
+      "js/ts.experimental.useTsgo": false,
+      "files.associations": {
+        "**/.githooks/pre-commit": "shellscript"
+      },
+      "[shellscript]": {
+        "editor.defaultFormatter": "mkhl.shfmt",
+        "editor.formatOnSave": true
+      }
+    }
