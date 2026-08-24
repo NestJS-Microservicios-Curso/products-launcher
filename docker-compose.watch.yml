@@ -13,6 +13,9 @@ services:
         - path: ./products-microservice/package.json
           target: /usr/src/app/package.json
           action: rebuild
+        - path: ./products-microservice/package-lock.json
+          target: /usr/src/app/package-lock.json
+          action: rebuild
 
   orders-ms:
     build:
@@ -27,6 +30,9 @@ services:
           action: sync
         - path: ./orders-microservice/package.json
           target: /usr/src/app/package.json
+          action: rebuild
+        - path: ./orders-microservice/package-lock.json
+          target: /usr/src/app/package-lock.json
           action: rebuild
 
   payments-ms:
@@ -43,6 +49,27 @@ services:
         - path: ./payments-microservice/package.json
           target: /usr/src/app/package.json
           action: rebuild
+        - path: ./payments-microservice/package-lock.json
+          target: /usr/src/app/package-lock.json
+          action: rebuild
+
+  auth-ms:
+    build:
+      context: ./auth-microservice
+      dockerfile: Dockerfile
+      target: dev
+    command: npm run start:dev
+    develop:
+      watch:
+        - path: ./auth-microservice/src
+          target: /usr/src/app/src
+          action: sync
+        - path: ./auth-microservice/package.json
+          target: /usr/src/app/package.json
+          action: rebuild
+        - path: ./auth-microservice/package-lock.json
+          target: /usr/src/app/package-lock.json
+          action: rebuild
 
   client-gateway:
     build:
@@ -57,4 +84,7 @@ services:
           action: sync
         - path: ./client-gateway/package.json
           target: /usr/src/app/package.json
+          action: rebuild
+        - path: ./client-gateway/package-lock.json
+          target: /usr/src/app/package-lock.json
           action: rebuild

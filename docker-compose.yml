@@ -1,5 +1,6 @@
 services:
   nats-server:
+    attach: true
     image: nats:2.10-alpine
     container_name: nats_server
     ports:
@@ -13,18 +14,23 @@ services:
         max-file: "3"
 
   orders-db:
+    attach: false
     image: postgres:16.2
     container_name: orders_database
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: ${ORDERS_DB_USER:?ORDERS_DB_USER is required}
+      POSTGRES_PASSWORD: ${ORDERS_DB_PASSWORD:?ORDERS_DB_PASSWORD is required}
       POSTGRES_DB: ordersdb
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
       - orders_db_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d ordersdb"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${ORDERS_DB_USER:?ORDERS_DB_USER is required} -d ordersdb",
+        ]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -36,7 +42,59 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  auth-db:
+    attach: false
+    image: mongo:7.0.0
+    container_name: auth_database
+    entrypoint: ["/usr/local/bin/auth-db-entrypoint.sh"]
+    command:
+      [
+        "mongod",
+        "--quiet",
+        "--replSet",
+        "rs0",
+        "--bind_ip_all",
+        "--keyFile",
+        "/data/db/keyfile",
+      ]
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${AUTH_DB_USER:?AUTH_DB_USER is required}
+      MONGO_INITDB_ROOT_PASSWORD: ${AUTH_DB_PASSWORD:?AUTH_DB_PASSWORD is required}
+      MONGO_INITDB_DATABASE: authdb
+    ports:
+      - "127.0.0.1:${AUTH_DB_PORT:-27017}:27017"
+    volumes:
+      - auth_db_data:/data/db
+      - ./scripts/auth-db-entrypoint.sh:/usr/local/bin/auth-db-entrypoint.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/27017'"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  auth-db-init:
+    attach: false
+    image: mongo:7.0.0
+    depends_on:
+      auth-db:
+        condition: service_healthy
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${AUTH_DB_USER:?AUTH_DB_USER is required}
+      MONGO_INITDB_ROOT_PASSWORD: ${AUTH_DB_PASSWORD:?AUTH_DB_PASSWORD is required}
+    volumes:
+      - ./scripts/auth-db-init.sh:/usr/local/bin/auth-db-init.sh:ro
+    command: ["bash", "/usr/local/bin/auth-db-init.sh"]
+    restart: "no"
+
   products-ms:
+    attach: true
     build:
       context: ./products-microservice
       dockerfile: Dockerfile
@@ -58,6 +116,7 @@ services:
         max-file: "3"
 
   orders-ms:
+    attach: true
     build:
       context: ./orders-microservice
       dockerfile: Dockerfile
@@ -65,7 +124,7 @@ services:
     environment:
       PORT: 3002
       DATABASE_URL: >-
-        postgresql://postgres:postgres@orders-db:5432/ordersdb?schema=public
+        postgresql://${ORDERS_DB_USER:?ORDERS_DB_USER is required}:${ORDERS_DB_PASSWORD:?ORDERS_DB_PASSWORD is required}@orders-db:5432/ordersdb?schema=public
       NATS_SERVERS: "nats://nats-server:4222"
     depends_on:
       orders-db:
@@ -81,6 +140,7 @@ services:
         max-file: "3"
 
   payments-ms:
+    attach: true
     build:
       context: ./payments-microservice
       dockerfile: Dockerfile
@@ -102,7 +162,34 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  auth-ms:
+    attach: true
+    build:
+      context: ./auth-microservice
+      dockerfile: Dockerfile
+    container_name: auth_microservice
+    environment:
+      PORT: 3004
+      DATABASE_URL: ${AUTH_DATABASE_URL}
+      NATS_SERVERS: "nats://nats-server:4222"
+      JWT_SECRET: ${JWT_SECRET}
+    depends_on:
+      auth-db:
+        condition: service_healthy
+      auth-db-init:
+        condition: service_completed_successfully
+      nats-server:
+        condition: service_started
+    init: true
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   client-gateway:
+    attach: true
     build:
       context: ./client-gateway
       dockerfile: Dockerfile
@@ -125,3 +212,4 @@ services:
 volumes:
   orders_db_data:
   products_db_data:
+  auth_db_data:

@@ -1,7 +1,12 @@
-# Local Pi runtime state
+# Files and directories to ignore
+node_modules/
+.DS_Store
+
+# AI config files
 .atl/
 .pi/
 .codegraph/
+.windsurf/
 
 # Environment files
 .env

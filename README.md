@@ -2,7 +2,7 @@
 
 Docker environment and multi-repo orchestrator for a distributed NestJS microservices application.
 
-The architecture follows the **API Gateway Pattern** with **Event-Driven Microservices** powered by **NATS Messaging**, PostgreSQL, SQLite, and Stripe payment processing. All external HTTP traffic is strictly funneled through the API Gateway, leaving internal microservices fully private and decoupled.
+The architecture follows the **API Gateway Pattern** with **Event-Driven Microservices** powered by **NATS Messaging**, PostgreSQL, SQLite, MongoDB, and Stripe payment processing. All external HTTP traffic is strictly funneled through the API Gateway, leaving internal microservices fully private and decoupled.
 
 ---
 
@@ -28,11 +28,13 @@ flowchart TD
         ProductsMS["products-ms\n(SQLite + Seed Data)"]
         OrdersMS["orders-ms\n(PostgreSQL)"]
         PaymentsMS["payments-ms\n(Stripe SDK & HMAC Validation)"]
+        AuthMS["auth-ms\n(MongoDB + argon2 Hashing)"]
     end
-
+    
     subgraph Storage["Databases"]
         OrdersDB[("PostgreSQL\nordersdb")]
         ProductsDB[("SQLite\ndev.db")]
+        AuthDB[("MongoDB Replica Set\nauthdb")]
     end
 
     %% Inbound HTTP
@@ -47,6 +49,7 @@ flowchart TD
     NATS <-->|"validate_products\ncreate_product..."| ProductsMS
     NATS <-->|"createOrder\nfindAllOrders..."| OrdersMS
     NATS <-->|"create.payment.session\nverify.stripe.webhook"| PaymentsMS
+    NATS <-->|"auth.register.user\nauth.login.user / auth.verify.token"| AuthMS
 
     %% Event-Driven pub/sub
     PaymentsMS -.->|"Event: payment.succeeded\nEvent: payment.failed"| NATS
@@ -55,6 +58,7 @@ flowchart TD
     %% Persistence
     OrdersMS --> OrdersDB
     ProductsMS --> ProductsDB
+    AuthMS --> AuthDB
 ```
 
 ---
@@ -67,8 +71,10 @@ flowchart TD
 | **`products-ms`**    | Product catalog & price validation. Uses SQLite persisted in Docker volumes with automatic 47-item seed.                                                        | **Private** (Internal NATS only)                |
 | **`orders-ms`**      | Order management, lifecycle state machine (`PENDING`, `PAID`, `CANCELLED`), and transaction receipt storage.                                                    | **Private** (Internal NATS only)                |
 | **`payments-ms`**    | Stripe Checkout session creation, raw body HMAC-SHA256 signature verification, and payment event dispatching.                                                   | **Private** (Internal NATS only)                |
+| **`auth-ms`**        | User registration & login with **argon2** password hashing and token verification.                                                                              | **Private** (Internal NATS only)                |
 | **`nats-server`**    | High-performance publish/subscribe and request-reply message broker.                                                                                            | Port `4222`, Monitoring `8222`                  |
 | **`orders-db`**      | Orders PostgreSQL database.                                                                                                                                     | Port `127.0.0.1:5432`                           |
+| **`auth-db`**        | Auth MongoDB database (single-node replica set with keyfile auth, initialized by a one-shot `auth-db-init` container).                                          | Port `127.0.0.1:${AUTH_DB_PORT:-27017}`         |
 
 ---
 
@@ -104,17 +110,31 @@ All public endpoints are accessible through the Gateway base URL: `http://localh
 | `GET`  | `/api/payments/success` | -                                    | Local Gateway response  | Redirect landing page after successful checkout                                                   |
 | `GET`  | `/api/payments/cancel`  | -                                    | Local Gateway response  | Redirect landing page when payment is canceled or aborted                                         |
 
+### 🔐 Auth (`/api/auth`)
+
+| Method | Endpoint             | Payload                                         | Target NATS Pattern  | Description                                                        |
+| :----- | :------------------- | :---------------------------------------------- | :------------------- | :----------------------------------------------------------------- |
+| `POST` | `/api/auth/register` | `RegisterUserDto` (`{ name, email, password }`) | `auth.register.user` | Registers a new user; passwords are hashed with **argon2**         |
+| `POST` | `/api/auth/login`    | `LoginUserDto` (`{ email, password }`)          | `auth.login.user`    | Validates credentials against MongoDB and returns the user payload |
+| `POST` | `//api/auth/verify`  | `{ token }`                                     | `auth.verify.token`  | Verifies an authentication token                                   |
+
+> [!NOTE]
+> Token issuance currently returns a placeholder value (`JWT_PENDING`): real JWT signing/verification is still pending implementation in `auth-ms`.
+
 ---
 
 ## Internal NATS Contracts
 
 ### Request-Reply Patterns (`@MessagePattern`)
 
-| Pattern                  | Sender           | Receiver      | Payload                                              | Response                         |
-| :----------------------- | :--------------- | :------------ | :--------------------------------------------------- | :------------------------------- |
-| `validate_products`      | `orders-ms`      | `products-ms` | `number[]` (product IDs)                             | `ValidatedProduct[]`             |
-| `create.payment.session` | `orders-ms`      | `payments-ms` | `PaymentSessionDto` (`{ orderId, currency, items }`) | `{ cancelUrl, successUrl, url }` |
-| `verify.stripe.webhook`  | `client-gateway` | `payments-ms` | `{ rawBody: string (base64), signature: string }`    | `{ received: true }`             |
+| Pattern                  | Sender           | Receiver      | Payload                                              | Response                                            |
+| :----------------------- | :--------------- | :------------ | :--------------------------------------------------- | :-------------------------------------------------- |
+| `validate_products`      | `orders-ms`      | `products-ms` | `number[]` (product IDs)                             | `ValidatedProduct[]`                                |
+| `create.payment.session` | `orders-ms`      | `payments-ms` | `PaymentSessionDto` (`{ orderId, currency, items }`) | `{ cancelUrl, successUrl, url }`                    |
+| `verify.stripe.webhook`  | `client-gateway` | `payments-ms` | `{ rawBody: string (base64), signature: string }`    | `{ received: true }`                                |
+| `auth.register.user`     | `client-gateway` | `auth-ms`     | `RegisterUserDto` (`{ name, email, password }`)      | User payload (hashed credentials stored in MongoDB) |
+| `auth.login.user`        | `client-gateway` | `auth-ms`     | `LoginUserDto` (`{ email, password }`)               | User payload on valid credentials                   |
+| `auth.verify.token`      | `client-gateway` | `auth-ms`     | `{ token }`                                          | Verified user payload or `Invalid token`            |
 
 ### Event-Driven Pub/Sub (`@EventPattern`)
 
@@ -166,7 +186,28 @@ All public endpoints are accessible through the Gateway base URL: `http://localh
    >   - `docker-compose.yml` (Production Base): Builds the multi-stage `runner` target, runs compiled code (`node dist/main.js`), prunes `devDependencies`, and avoids any runtime watching overhead.
    >   - `docker-compose.watch.yml` (Development Overlay): Extends the base configuration to use the `dev` target, runs `npm run start:dev`, and activates Compose Watch.
    > - **Code Hot Reloading without Bind Mounts:** Instead of legacy bind mounts (`volumes: - ./src:/app/src`) that cause severe I/O degradation on macOS and file permission issues, **Compose Watch (`develop.watch`)** detects local file changes and syncs them directly into the running container for instant NestJS hot reloading.
-   > - **Data Persistence vs. Code Syncing:** Named database volumes (`orders_db_data`, `products_db_data`) are strictly for persistent storage (PostgreSQL/SQLite) and are defined only in the base file. Stateless services (such as `payments-ms`) require no volumes. Compose files automatically merge when both `-f` flags are supplied.
+   > - **Data Persistence vs. Code Syncing:** Named database volumes (`orders_db_data`, `products_db_data`, `auth_db_data`) are strictly for persistent storage (PostgreSQL/SQLite/MongoDB) and are defined only in the base file. Stateless services (such as `payments-ms`) require no volumes. Compose files automatically merge when both `-f` flags are supplied.
+
+---
+
+## Environment Variables (Root `.env`)
+
+Required/consumed by `docker-compose.yml`. Copy `.env.template` to `.env` and fill in:
+
+| Variable                                | Used by                              | Purpose                                                                           |
+| :-------------------------------------- | :----------------------------------- | :-------------------------------------------------------------------------------- |
+| `CLIENT_GATEWAY_PORT`                   | `client-gateway`                     | Host port mapped to the gateway (default `3000`)                                  |
+| `STRIPE_SECRET_KEY`                     | `payments-ms`                        | Stripe API key                                                                    |
+| `STRIPE_SUCCESS_URL`                    | `payments-ms`                        | Redirect URL after successful checkout                                            |
+| `STRIPE_CANCEL_URL`                     | `payments-ms`                        | Redirect URL when checkout is canceled                                            |
+| `STRIPE_WEBHOOK_SIGNATURE_SECRET`       | `payments-ms`                        | Secret used to verify Stripe webhook signatures                                   |
+| `ORDERS_DB_USER` / `ORDERS_DB_PASSWORD` | `orders-db`, `orders-ms`             | PostgreSQL credentials (also used to run migrations from the root)                |
+| `DATABASE_URL`                          | (host only)                          | PostgreSQL connection string for running Prisma migrations from the launcher root |
+| `AUTH_DB_USER` / `AUTH_DB_PASSWORD`     | `auth-db`, `auth-db-init`, `auth-ms` | MongoDB root credentials for the replica set                                      |
+| `AUTH_DATABASE_URL`                     | `auth-ms`                            | MongoDB connection string (replica set `rs0`)                                     |
+| `AUTH_DB_PORT` *(optional)*             | `auth-db`                            | Host port for MongoDB (defaults to `27017`)                                       |
+
+Per-service variables (`PORT`, `NATS_SERVERS`) are hardcoded in the compose file; each microservice documents its own extras in its local `.env.template`.
 
 ---
 
@@ -193,7 +234,7 @@ docker compose ps
 docker compose logs -f
 ```
 
-All six services should appear as running: `nats-server`, `orders-db`, `products-ms`, `orders-ms`, `payments-ms`, and `client-gateway`.
+All services should appear as running: `nats-server`, `orders-db`, `auth-db`, `products-ms`, `orders-ms`, `payments-ms`, `auth-ms`, and `client-gateway` (plus the one-shot `auth-db-init` initializer, which exits after seeding the replica set).
 
 ---
 
@@ -201,6 +242,7 @@ All six services should appear as running: `nats-server`, `orders-db`, `products
 
 - `orders_db_data`: PostgreSQL data for `orders-ms`.
 - `products_db_data`: SQLite file and catalog for `products-ms`.
+- `auth_db_data`: MongoDB data for `auth-ms`.
 
 To stop the environment without deleting data:
 
