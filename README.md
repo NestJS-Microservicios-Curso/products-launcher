@@ -179,6 +179,40 @@ All public endpoints are accessible through the Gateway base URL: `http://localh
      docker compose -f docker-compose.yml -f docker-compose.watch.yml up --build --watch
      ```
 
+   ### Manual Docker image builds
+
+   To build the `client-gateway` images directly from their multistage targets, run these commands from the `client-gateway/` directory:
+
+   ```bash
+   # Production image
+   docker build --target runner -f Dockerfile -t client-gateway:prod .
+
+   # Development image
+   docker build --target dev -f Dockerfile -t client-gateway:dev .
+   ```
+
+   To build all application images in the launcher without starting containers, run these commands from the root. Both variables are required by the Compose image names:
+
+   - **Production (`runner` target):** use only `docker-compose.yml`:
+
+   ```bash
+   DOCKERHUB_USERNAME=andres87 \
+   IMAGE_TAG=1.0.0 \
+   docker compose -f docker-compose.yml build
+   ```
+
+   - **Development (`dev` target):** combine the base Compose file with the Compose Watch overlay:
+
+   ```bash
+   DOCKERHUB_USERNAME=andres87 \
+   IMAGE_TAG=dev \
+   docker compose -f docker-compose.yml -f docker-compose.watch.yml build
+   ```
+
+   `docker compose build` builds images but does **not** start containers. The normal Compose file selects the `runner` target for production, while the Compose Watch overlay selects the `dev` target for development.
+
+   If `--target` is omitted from a direct `docker build` command, Docker builds the last stage, `runner` (the production image).
+
    > [!NOTE]
    > **Architecture Note: File Separation, Compose Watch vs. Legacy Bind Mounts & Volumes**
    >

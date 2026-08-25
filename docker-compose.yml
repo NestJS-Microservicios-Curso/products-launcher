@@ -98,9 +98,11 @@ services:
     build:
       context: ./products-microservice
       dockerfile: Dockerfile
+      target: runner
+    image: "${DOCKERHUB_USERNAME:?DOCKERHUB_USERNAME is required}/\
+      products-ms:${IMAGE_TAG:?IMAGE_TAG is required}"
     container_name: products_microservice
     environment:
-      PORT: 3001
       DATABASE_URL: "file:/usr/src/app/prisma/data/dev.db"
       NATS_SERVERS: "nats://nats-server:4222"
     volumes:
@@ -120,11 +122,16 @@ services:
     build:
       context: ./orders-microservice
       dockerfile: Dockerfile
+      target: runner
+    image: "${DOCKERHUB_USERNAME:?DOCKERHUB_USERNAME is required}/\
+      orders-ms:${IMAGE_TAG:?IMAGE_TAG is required}"
     container_name: orders_microservice
     environment:
-      PORT: 3002
-      DATABASE_URL: >-
-        postgresql://${ORDERS_DB_USER:?ORDERS_DB_USER is required}:${ORDERS_DB_PASSWORD:?ORDERS_DB_PASSWORD is required}@orders-db:5432/ordersdb?schema=public
+      DATABASE_URL: "postgresql://\
+        ${ORDERS_DB_USER:?ORDERS_DB_USER is required}:\
+        ${ORDERS_DB_PASSWORD:?ORDERS_DB_PASSWORD is required}\
+        @orders-db:5432/ordersdb?schema=\
+        public"
       NATS_SERVERS: "nats://nats-server:4222"
     depends_on:
       orders-db:
@@ -144,9 +151,11 @@ services:
     build:
       context: ./payments-microservice
       dockerfile: Dockerfile
+      target: runner
+    image: "${DOCKERHUB_USERNAME:?DOCKERHUB_USERNAME is required}/\
+      payments-ms:${IMAGE_TAG:?IMAGE_TAG is required}"
     container_name: payments_microservice
     environment:
-      PORT: 3003
       NATS_SERVERS: "nats://nats-server:4222"
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
       STRIPE_SUCCESS_URL: ${STRIPE_SUCCESS_URL}
@@ -167,9 +176,11 @@ services:
     build:
       context: ./auth-microservice
       dockerfile: Dockerfile
+      target: runner
+    image: "${DOCKERHUB_USERNAME:?DOCKERHUB_USERNAME is required}/\
+      auth-ms:${IMAGE_TAG:?IMAGE_TAG is required}"
     container_name: auth_microservice
     environment:
-      PORT: 3004
       DATABASE_URL: ${AUTH_DATABASE_URL}
       NATS_SERVERS: "nats://nats-server:4222"
       JWT_SECRET: ${JWT_SECRET}
@@ -193,6 +204,9 @@ services:
     build:
       context: ./client-gateway
       dockerfile: Dockerfile
+      target: runner
+    image: "${DOCKERHUB_USERNAME:?DOCKERHUB_USERNAME is required}/\
+      client-gateway:${IMAGE_TAG:?IMAGE_TAG is required}"
     container_name: client_gateway
     ports:
       - "${CLIENT_GATEWAY_PORT:-3000}:3000"
