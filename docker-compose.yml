@@ -99,8 +99,8 @@ services:
       context: ./products-microservice
       dockerfile: Dockerfile
       target: runner
-    image: "${DOCKERHUB_USERNAME:?DOCKERHUB_USERNAME is required}/\
-      products-ms:${IMAGE_TAG:?IMAGE_TAG is required}"
+    image: "${IMAGE_REGISTRY_GC_URL:+${IMAGE_REGISTRY_GC_URL}/}\
+      products-microservice"
     container_name: products_microservice
     environment:
       DATABASE_URL: "file:/usr/src/app/prisma/data/dev.db"
@@ -123,8 +123,8 @@ services:
       context: ./orders-microservice
       dockerfile: Dockerfile
       target: runner
-    image: "${DOCKERHUB_USERNAME:?DOCKERHUB_USERNAME is required}/\
-      orders-ms:${IMAGE_TAG:?IMAGE_TAG is required}"
+    image: "${IMAGE_REGISTRY_GC_URL:+${IMAGE_REGISTRY_GC_URL}/}\
+      orders-microservice"
     container_name: orders_microservice
     environment:
       DATABASE_URL: "postgresql://\
@@ -152,8 +152,8 @@ services:
       context: ./payments-microservice
       dockerfile: Dockerfile
       target: runner
-    image: "${DOCKERHUB_USERNAME:?DOCKERHUB_USERNAME is required}/\
-      payments-ms:${IMAGE_TAG:?IMAGE_TAG is required}"
+    image: "${IMAGE_REGISTRY_GC_URL:+${IMAGE_REGISTRY_GC_URL}/}\
+      payments-microservice"
     container_name: payments_microservice
     environment:
       NATS_SERVERS: "nats://nats-server:4222"
@@ -177,8 +177,8 @@ services:
       context: ./auth-microservice
       dockerfile: Dockerfile
       target: runner
-    image: "${DOCKERHUB_USERNAME:?DOCKERHUB_USERNAME is required}/\
-      auth-ms:${IMAGE_TAG:?IMAGE_TAG is required}"
+    image: "${IMAGE_REGISTRY_GC_URL:+${IMAGE_REGISTRY_GC_URL}/}\
+      auth-microservice"
     container_name: auth_microservice
     environment:
       DATABASE_URL: ${AUTH_DATABASE_URL}
@@ -205,8 +205,8 @@ services:
       context: ./client-gateway
       dockerfile: Dockerfile
       target: runner
-    image: "${DOCKERHUB_USERNAME:?DOCKERHUB_USERNAME is required}/\
-      client-gateway:${IMAGE_TAG:?IMAGE_TAG is required}"
+    image: "${IMAGE_REGISTRY_GC_URL:+${IMAGE_REGISTRY_GC_URL}/}\
+      client-gateway"
     container_name: client_gateway
     ports:
       - "${CLIENT_GATEWAY_PORT:-3000}:3000"

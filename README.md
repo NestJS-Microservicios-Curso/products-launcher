@@ -191,27 +191,76 @@ All public endpoints are accessible through the Gateway base URL: `http://localh
    docker build --target dev -f Dockerfile -t client-gateway:dev .
    ```
 
-   To build all application images in the launcher without starting containers, run these commands from the root. Both variables are required by the Compose image names:
+   ### Build and publish images to Google Artifact Registry
 
-   - **Production (`runner` target):** use only `docker-compose.yml`:
+   Use the production Compose file to build and publish the five application
+   images without starting containers.
+
+   **Prerequisites:**
+
+   - Google Cloud CLI is installed.
+   - The Google Cloud project and Artifact Registry repository already exist.
+   - Your account has write permissions for the repository.
+
+   Authenticate and configure Docker for Google Artifact Registry:
 
    ```bash
-   DOCKERHUB_USERNAME=andres87 \
-   IMAGE_TAG=1.0.0 \
+   gcloud auth login
+   gcloud config set project <your-project-id>
+   gcloud auth configure-docker your-region-docker.pkg.dev
+   ```
+
+   Set this value in `.env`:
+
+   ```dotenv
+   IMAGE_REGISTRY_GC_URL=
+   ```
+
+   Build the five production images without starting containers:
+
+   ```bash
    docker compose -f docker-compose.yml build
    ```
 
-   - **Development (`dev` target):** combine the base Compose file with the Compose Watch overlay:
+   Optionally verify the generated image names:
 
    ```bash
-   DOCKERHUB_USERNAME=andres87 \
-   IMAGE_TAG=dev \
+   docker compose -f docker-compose.yml config --images
+   ```
+
+   The configured registry prefix is prepended to these five final names:
+
+   - `client-gateway`
+   - `products-microservice`
+   - `orders-microservice`
+   - `payments-microservice`
+   - `auth-microservice`
+
+   Publish them to the configured Artifact Registry repository:
+
+   ```bash
+   docker compose -f docker-compose.yml push
+   ```
+
+   If `IMAGE_REGISTRY_GC_URL` is absent or empty, `build` creates local
+   images only. Do not use `push` to publish them to Google Artifact Registry
+   until the variable is configured. A reference without a tag is interpreted
+   by Docker as `latest`; Google Artifact Registry does not assign that tag
+   automatically.
+
+   For development (`dev` target), combine the base Compose file with the
+   Compose Watch overlay:
+
+   ```bash
    docker compose -f docker-compose.yml -f docker-compose.watch.yml build
    ```
 
-   `docker compose build` builds images but does **not** start containers. The normal Compose file selects the `runner` target for production, while the Compose Watch overlay selects the `dev` target for development.
+   `docker compose build` builds images but does **not** start containers. The
+   normal Compose file selects the `runner` target for production, while the
+   Compose Watch overlay selects the `dev` target for development.
 
-   If `--target` is omitted from a direct `docker build` command, Docker builds the last stage, `runner` (the production image).
+   If `--target` is omitted from a direct `docker build` command, Docker builds
+   the last stage, `runner` (the production image).
 
    > [!NOTE]
    > **Architecture Note: File Separation, Compose Watch vs. Legacy Bind Mounts & Volumes**
@@ -231,6 +280,7 @@ Required/consumed by `docker-compose.yml`. Copy `.env.template` to `.env` and fi
 | Variable                                | Used by                              | Purpose                                                                           |
 | :-------------------------------------- | :----------------------------------- | :-------------------------------------------------------------------------------- |
 | `CLIENT_GATEWAY_PORT`                   | `client-gateway`                     | Host port mapped to the gateway (default `3000`)                                  |
+| `IMAGE_REGISTRY_GC_URL`                 | Application images                   | Optional GAR prefix; leave empty to use local image names                         |
 | `STRIPE_SECRET_KEY`                     | `payments-ms`                        | Stripe API key                                                                    |
 | `STRIPE_SUCCESS_URL`                    | `payments-ms`                        | Redirect URL after successful checkout                                            |
 | `STRIPE_CANCEL_URL`                     | `payments-ms`                        | Redirect URL when checkout is canceled                                            |
