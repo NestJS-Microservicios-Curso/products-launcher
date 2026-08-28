@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: payments-microservice
+  name: payments-microservice
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: payments-microservice
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app: payments-microservice
+    spec:
+      containers:
+        - image: europe-west9-docker.pkg.dev/nestjs-microservices-506615/image-registry/payments-microservice
+          name: payments-microservice
+          env:
+            - name: PORT
+              value: "3000"
+            - name: NATS_SERVERS
+              value: "nats://nats"
+            - name: STRIPE_SUCCESS_URL
+              value: "http://localhost:3000/api/payments/success"
+            - name: STRIPE_CANCEL_URL
+              value: "http://localhost:3000/api/payments/cancel"
+            - name: STRIPE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: payments-secrets
+                  key: stripe_secret_key
+            - name: STRIPE_WEBHOOK_SIGNATURE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: payments-secrets
+                  key: stripe_webhook_signature-secret
+          resources: {}
+status: {}
