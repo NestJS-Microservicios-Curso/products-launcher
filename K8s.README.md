@@ -8,6 +8,8 @@
 
 ## K8s commands
 
+* Listar contextos configurados: `kubectl config get-contexts`
+* Cambiar el contexto activo: `kubectl config use-context <nombre-del-contexto>`
 * Obtener pods, deployments y services: `kubectl get <pods | deployments | services>`
 * Revisar todos pods: `kubectl describe pods`
 * Revisar un pod: `kubectl describe pod <nombre>`

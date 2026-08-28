@@ -1,0 +1,20 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tienda-ingress
+  annotations:
+    kubernetes.io/ingress.class: "gce"
+    kubernetes.io/ingress.global-static-ip-name: tienda-ingress-ip
+    networking.gke.io/managed-certificates: tienda-api-cert
+spec:
+  rules:
+    - host: api.tienda.andrescoder.dev
+      http:
+        paths:
+          - path: /*
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: client-gateway
+                port:
+                  number: 3000

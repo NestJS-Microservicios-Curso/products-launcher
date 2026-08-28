@@ -7,7 +7,8 @@ metadata:
     helm.sh/hook-weight: "5"
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 spec:
-  backoffLimit: 10
+  activeDeadlineSeconds: 300
+  backoffLimit: 2
 
   template:
     metadata:
@@ -38,17 +39,31 @@ spec:
             - sh
             - -c
             - |
-              MONGO_URI="mongodb://${MONGO_USER}:${MONGO_PASSWORD}@auth-db:27017/admin?authSource=admin&directConnection=true"
+              set -eu
+              end_time=$(($(date +%s) + 240))
+              mongo_host="auth-db-0.auth-db-headless.default.svc."
+              mongo_host="${mongo_host}cluster.local:27017"
 
-              until mongosh "$MONGO_URI" \
+              while ! mongosh --host "$mongo_host" \
+                --username "$MONGO_USER" \
+                --password "$MONGO_PASSWORD" \
+                --authenticationDatabase admin \
                 --quiet \
                 --eval "db.adminCommand('ping')" >/dev/null 2>&1
               do
+                if [ "$(date +%s)" -ge "$end_time" ]; then
+                          echo "Timed out waiting for authenticated MongoDB" \
+                            "at $mongo_host" >&2
+                  exit 1
+                fi
                 echo "Waiting for authenticated MongoDB..."
                 sleep 3
               done
 
-              mongosh "$MONGO_URI" \
+              mongosh --host "$mongo_host" \
+                --username "$MONGO_USER" \
+                --password "$MONGO_PASSWORD" \
+                --authenticationDatabase admin \
                 --quiet \
                 --eval '
                   try {
@@ -63,7 +78,9 @@ spec:
                           members: [
                             {
                               _id: 0,
-                              host: "auth-db:27017"
+                                  host:
+                                    "auth-db-0.auth-db-headless.default.svc." +
+                                    "cluster.local:27017"
                             }
                           ]
                         });
@@ -75,8 +92,42 @@ spec:
                           throw initError;
                         }
                       }
+                    } else if (statusError.code === 93) {
+                          const expectedMember =
+                            "auth-db-0.auth-db-headless.default.svc." +
+                            "cluster.local:27017";
+                          console.error(
+                            "Invalid persisted replica-set config (code 93): " +
+                            "this server is not a valid member. " +
+                            "Expected member host is " + expectedMember +
+                            ". Inspect and recover the existing " +
+                            "config; automatic initiation/" +
+                            "reconfiguration is disabled."
+
+                      );
+                      quit(1);
                     } else {
                       throw statusError;
                     }
                   }
                 '
+
+              while ! mongosh --host "$mongo_host" \
+                --username "$MONGO_USER" \
+                --password "$MONGO_PASSWORD" \
+                --authenticationDatabase admin \
+                --quiet \
+                --eval 'quit(db.hello().isWritablePrimary ? 0 : 1)' \
+                >/dev/null 2>&1
+              do
+                if [ "$(date +%s)" -ge "$end_time" ]; then
+                          echo "Timed out waiting for auth-db rs0 at" \
+                            "$mongo_host to become writable primary" >&2
+                  exit 1
+                fi
+                    echo "Waiting for auth-db replica set rs0 to become" \
+                      "writable primary..."
+                sleep 3
+              done
+
+              echo "auth-db replica set rs0 is writable"
