@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: orders-microservice
+  name: orders-microservice
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: orders-microservice
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app: orders-microservice
+    spec:
+      containers:
+        - image: europe-west9-docker.pkg.dev/nestjs-microservices-506615/image-registry/orders-microservice
+          name: orders-microservice
+          env:
+            - name: PORT
+              value: "3000"
+            - name: NATS_SERVERS
+              value: "nats://nats"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: orders-secrets
+                  key: database_url
+          resources: {}
+status: {}

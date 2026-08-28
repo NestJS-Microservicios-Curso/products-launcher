@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: products-microservice
+  name: products-microservice
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: products-microservice
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app: products-microservice
+    spec:
+      containers:
+        - image: europe-west9-docker.pkg.dev/nestjs-microservices-506615/image-registry/products-microservice
+          name: products-microservice
+          env:
+            - name: PORT
+              value: "3000"
+            - name: DATABASE_URL
+              value: "file:/usr/src/app/prisma/data/dev.db"
+            - name: NATS_SERVERS
+              value: "nats://nats"
+          resources: {}
+status: {}

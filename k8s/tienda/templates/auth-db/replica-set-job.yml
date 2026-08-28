@@ -1,0 +1,82 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: auth-db-init-replica-set
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 10
+
+  template:
+    metadata:
+      labels:
+        app: auth-db-init
+
+    spec:
+      restartPolicy: OnFailure
+
+      containers:
+        - name: init-replica-set
+          image: mongo:7.0.0
+
+          env:
+            - name: MONGO_USER
+              valueFrom:
+                secretKeyRef:
+                  name: auth-secrets
+                  key: mongo_user
+
+            - name: MONGO_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: auth-secrets
+                  key: mongo_password
+
+          command:
+            - sh
+            - -c
+            - |
+              MONGO_URI="mongodb://${MONGO_USER}:${MONGO_PASSWORD}@auth-db:27017/admin?authSource=admin&directConnection=true"
+
+              until mongosh "$MONGO_URI" \
+                --quiet \
+                --eval "db.adminCommand('ping')" >/dev/null 2>&1
+              do
+                echo "Waiting for authenticated MongoDB..."
+                sleep 3
+              done
+
+              mongosh "$MONGO_URI" \
+                --quiet \
+                --eval '
+                  try {
+                    const status = rs.status();
+                    print("Replica set already initialized");
+                    printjson(status.members);
+                  } catch (statusError) {
+                    if (statusError.code === 94) {
+                      try {
+                        rs.initiate({
+                          _id: "rs0",
+                          members: [
+                            {
+                              _id: 0,
+                              host: "auth-db:27017"
+                            }
+                          ]
+                        });
+                        print("Replica set initialized");
+                      } catch (initError) {
+                        if (initError.code === 23) {
+                          print("Replica set was already initialized");
+                        } else {
+                          throw initError;
+                        }
+                      }
+                    } else {
+                      throw statusError;
+                    }
+                  }
+                '
